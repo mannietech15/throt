@@ -1,0 +1,12 @@
+[package]
+name = "throt-algorithms"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+throt-core.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

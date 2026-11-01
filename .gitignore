@@ -1,0 +1,18 @@
+/target
+**/*.rs.bk
+
+# Environment & secrets
+.env
+*.pem
+*.key
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Test & coverage artifacts
+coverage/
+*.lcov

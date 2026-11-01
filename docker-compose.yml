@@ -1,0 +1,58 @@
+services:
+  throt-postgres:
+    image: postgres:16-alpine
+    container_name: throt-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: throt
+      POSTGRES_PASSWORD: throt_secret
+      POSTGRES_DB: throt
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U throt -d throt"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  throt-redis:
+    image: redis:7-alpine
+    container_name: throt-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  throt-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: throt-server
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      HOST: 0.0.0.0
+      PORT: 8080
+      DATABASE_URL: postgres://throt:throt_secret@throt-postgres:5432/throt
+      REDIS_URL: redis://throt-redis:6379
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"
+    depends_on:
+      throt-postgres:
+        condition: service_healthy
+      throt-redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

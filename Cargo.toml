@@ -1,0 +1,50 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/throt-core",
+    "crates/throt-algorithms",
+    "crates/throt-storage",
+    "crates/throt-api",
+    "crates/throt-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Mannie <mannietech817@gmail.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mannietech15/throt"
+
+[workspace.dependencies]
+# Internal workspace crates
+throt-core = { path = "crates/throt-core" }
+throt-algorithms = { path = "crates/throt-algorithms" }
+throt-storage = { path = "crates/throt-storage" }
+throt-api = { path = "crates/throt-api" }
+
+# Async runtime & HTTP
+tokio = { version = "1.43", features = ["full"] }
+axum = { version = "0.8", features = ["macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "cors", "request-id"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Storage
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "uuid", "chrono", "migrate"] }
+redis = { version = "0.27", features = ["tokio-comp", "aio", "connection-manager"] }
+
+# Utilities & Error handling
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2.0"
+anyhow = "1.0"
+async-trait = "0.1"
+
+# Logging & Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"

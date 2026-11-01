@@ -107,6 +107,20 @@ impl RateLimiter for FixedWindowRateLimiter {
     }
 }
 
+#[async_trait]
+impl throt_core::RateLimitEvaluator for FixedWindowRateLimiter {
+    async fn evaluate_request(
+        &self,
+        application_id: uuid::Uuid,
+        policy: &RateLimitPolicy,
+        identity: &throt_core::Identity,
+        cost: u64,
+    ) -> Result<Decision, ThrotError> {
+        let key = format!("throt:{}:{}:{}", application_id, policy.id, identity);
+        self.evaluate(&key, cost, policy).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

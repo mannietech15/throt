@@ -1,11 +1,10 @@
 pub mod config;
 pub mod startup;
 
-use axum::Router;
 use config::Config;
 use startup::shutdown_signal;
 use std::sync::Arc;
-use throt_api::{health_router, AppState};
+use throt_api::AppState;
 use throt_storage::{PostgresPool, RedisStorage};
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
@@ -50,13 +49,27 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app_state = Arc::new(AppState {
-        redis: redis_storage,
-        postgres: postgres_pool,
+        redis: redis_storage.clone(),
+        postgres: postgres_pool.clone(),
     });
 
+    // Initialize Rate Limit Engine
+    let policy_store: Arc<dyn throt_core::PolicyStore> = if let Some(ref pg) = postgres_pool {
+        Arc::new(pg.clone())
+    } else {
+        Arc::new(throt_core::InMemoryPolicyStore::new())
+    };
+
+    let evaluator: Arc<dyn throt_core::RateLimitEvaluator> = if let Some(ref r) = redis_storage {
+        Arc::new(throt_storage::RedisRateLimitEvaluator::new(r.clone()))
+    } else {
+        Arc::new(throt_algorithms::FixedWindowRateLimiter::new())
+    };
+
+    let engine = Arc::new(throt_core::RateLimitEngine::new(policy_store, evaluator));
+
     // Build Axum application router
-    let app = Router::new()
-        .merge(health_router(app_state))
+    let app = throt_api::create_router(app_state, engine, postgres_pool)
         .layer(TraceLayer::new_for_http());
 
     let addr = config.socket_addr()?;

@@ -7,7 +7,6 @@ use throt_core::{
     AlgorithmType, FailureMode, InMemoryPolicyStore, RateLimitEngine, RateLimitPolicy,
 };
 use tower::ServiceExt;
-use uuid::Uuid;
 
 #[tokio::test]
 async fn test_auth_middleware_rejects_missing_key() {
@@ -49,21 +48,15 @@ async fn test_evaluate_endpoint_end_to_end() {
         postgres: None,
     });
     let policy_store = Arc::new(InMemoryPolicyStore::new());
-    let app_id = Uuid::nil();
+    let app_id = throt_api::middleware::DEV_SANDBOX_APP_ID;
 
-    let policy = RateLimitPolicy {
-        id: Uuid::new_v4(),
-        application_id: app_id,
-        name: "standard".to_string(),
-        algorithm: AlgorithmType::FixedWindow,
-        request_limit: 10,
-        window_seconds: 60,
-        burst_capacity: None,
-        refill_rate: None,
-        failure_mode: FailureMode::FailClosed,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
+    let policy = RateLimitPolicy::builder("standard", AlgorithmType::FixedWindow)
+        .application_id(app_id)
+        .request_limit(10)
+        .window_seconds(60)
+        .failure_mode(FailureMode::FailClosed)
+        .build()
+        .expect("Valid policy");
     policy_store.insert_policy(policy);
 
     let evaluator = Arc::new(throt_algorithms::FixedWindowRateLimiter::new());

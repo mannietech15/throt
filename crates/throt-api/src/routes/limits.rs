@@ -4,7 +4,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::Deserialize;
 use std::sync::Arc;
-use throt_core::{Application, EvaluationRequest, Identity, RateLimitEngine};
+use throt_core::{Application, EvaluationRequest, RateLimitEngine};
 
 use crate::response::ApiErrorResponse;
 
@@ -27,25 +27,26 @@ pub async fn evaluate_handler(
     Extension(app): Extension<Application>,
     Json(payload): Json<EvaluateRequestBody>,
 ) -> Response {
-    let identity = match Identity::new(payload.identity) {
-        Ok(id) => id,
+    let req = match EvaluationRequest::for_application(
+        app.id,
+        payload.identity,
+        payload.policy,
+        payload.cost.unwrap_or(1),
+    ) {
+        Ok(r) => r,
         Err(e) => {
-            return ApiErrorResponse::new("INVALID_IDENTITY", e)
+            return ApiErrorResponse::new("INVALID_REQUEST", e.to_string())
                 .to_response(StatusCode::BAD_REQUEST);
         }
-    };
-
-    let req = EvaluationRequest {
-        application_id: app.id,
-        identity,
-        policy_name: payload.policy,
-        cost: payload.cost.unwrap_or(1),
     };
 
     match state.engine.evaluate(req).await {
         Ok(decision) => (StatusCode::OK, Json(decision)).into_response(),
         Err(throt_core::ThrotError::PolicyNotFound(msg)) => {
             ApiErrorResponse::new("POLICY_NOT_FOUND", msg).to_response(StatusCode::NOT_FOUND)
+        }
+        Err(throt_core::ThrotError::Validation(msg)) => {
+            ApiErrorResponse::new("VALIDATION_ERROR", msg).to_response(StatusCode::BAD_REQUEST)
         }
         Err(e) => ApiErrorResponse::new("EVALUATION_FAILED", e.to_string())
             .to_response(StatusCode::INTERNAL_SERVER_ERROR),

@@ -4,7 +4,7 @@ pub mod middleware;
 pub mod response;
 pub mod routes;
 
-pub use middleware::auth::{require_api_key, AuthState};
+pub use middleware::auth::{require_api_key, AuthState, DEV_SANDBOX_APP_ID};
 pub use response::{ApiErrorDetail, ApiErrorResponse, ApiResponse};
 pub use routes::create_router;
 pub use routes::health::{health_router, AppState};

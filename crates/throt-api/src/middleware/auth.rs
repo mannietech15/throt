@@ -70,7 +70,7 @@ pub async fn require_api_key(
     } else {
         // If Postgres is unconfigured in test/dev, generate a mock application
         let mock_app = Application {
-            id: uuid::Uuid::nil(),
+            id: DEV_SANDBOX_APP_ID,
             name: "Development Sandbox".to_string(),
             status: "active".to_string(),
             created_at: chrono::Utc::now(),
@@ -80,3 +80,6 @@ pub async fn require_api_key(
         next.run(req).await
     }
 }
+
+/// Deterministic, non-nil UUID assigned to mock applications in sandbox/test environments without PostgreSQL.
+pub const DEV_SANDBOX_APP_ID: uuid::Uuid = uuid::uuid!("00000000-0000-0000-0000-000000000001");

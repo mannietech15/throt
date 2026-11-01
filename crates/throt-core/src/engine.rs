@@ -97,13 +97,105 @@ impl PolicyStore for InMemoryPolicyStore {
     }
 }
 
+/// Helper trait to convert various string types or an existing `Identity` into `Identity`.
+pub trait IntoIdentity {
+    fn into_identity(self) -> Result<Identity, ThrotError>;
+}
+
+impl IntoIdentity for Identity {
+    fn into_identity(self) -> Result<Identity, ThrotError> {
+        Ok(self)
+    }
+}
+
+impl IntoIdentity for &Identity {
+    fn into_identity(self) -> Result<Identity, ThrotError> {
+        Ok(self.clone())
+    }
+}
+
+impl IntoIdentity for &str {
+    fn into_identity(self) -> Result<Identity, ThrotError> {
+        Identity::new(self).map_err(|e| ThrotError::Validation(format!("Invalid identity: {e}")))
+    }
+}
+
+impl IntoIdentity for String {
+    fn into_identity(self) -> Result<Identity, ThrotError> {
+        Identity::new(self).map_err(|e| ThrotError::Validation(format!("Invalid identity: {e}")))
+    }
+}
+
+impl IntoIdentity for &String {
+    fn into_identity(self) -> Result<Identity, ThrotError> {
+        Identity::new(self.as_str())
+            .map_err(|e| ThrotError::Validation(format!("Invalid identity: {e}")))
+    }
+}
+
 /// Evaluation request input to the rate-limiting engine.
 #[derive(Debug, Clone)]
 pub struct EvaluationRequest {
-    pub application_id: Uuid,
+    pub application_id: Option<Uuid>,
     pub identity: Identity,
     pub policy_name: Option<String>,
     pub cost: u64,
+}
+
+impl EvaluationRequest {
+    /// Creates a new evaluation request with validated identity and default cost.
+    ///
+    /// Note: `application_id` must be assigned via `.with_application_id()` or created
+    /// directly with `.for_application()` before evaluating in production.
+    pub fn new(
+        identity: impl IntoIdentity,
+        policy_name: Option<impl Into<String>>,
+        cost: u64,
+    ) -> Result<Self, ThrotError> {
+        let identity = identity.into_identity()?;
+        let policy_name = policy_name
+            .map(|p| p.into().trim().to_string())
+            .filter(|s| !s.is_empty());
+        let cost = if cost == 0 { 1 } else { cost };
+
+        Ok(Self {
+            application_id: None,
+            identity,
+            policy_name,
+            cost,
+        })
+    }
+
+    /// Creates a complete, validated evaluation request bound to a specific application ID.
+    /// Rejects `Uuid::nil()`.
+    pub fn for_application(
+        application_id: Uuid,
+        identity: impl IntoIdentity,
+        policy_name: Option<impl Into<String>>,
+        cost: u64,
+    ) -> Result<Self, ThrotError> {
+        let req = Self::new(identity, policy_name, cost)?;
+        req.with_application_id(application_id)
+    }
+
+    /// Attaches an application ID. Validates that the application ID is not nil (`Uuid::nil()`).
+    pub fn with_application_id(mut self, application_id: Uuid) -> Result<Self, ThrotError> {
+        if application_id.is_nil() {
+            return Err(ThrotError::Validation(
+                "Application ID cannot be nil (00000000-0000-0000-0000-000000000000)".to_string(),
+            ));
+        }
+        self.application_id = Some(application_id);
+        Ok(self)
+    }
+
+    /// Parses and attaches an application ID from a UUID string. Validates non-nil.
+    pub fn with_application_str(self, app_id_str: &str) -> Result<Self, ThrotError> {
+        let id = Uuid::parse_str(app_id_str.trim()).map_err(|e| {
+            ThrotError::Validation(format!("Invalid UUID format for application ID: {e}"))
+        })?;
+        self.with_application_id(id)
+    }
 }
 
 /// Dynamic evaluator trait to decouple core engine from specific storage or algorithm implementations.
@@ -134,6 +226,20 @@ impl RateLimitEngine {
 
     /// Evaluates an incoming rate-limit request according to policy precedence and failure behavior.
     pub async fn evaluate(&self, req: EvaluationRequest) -> Result<Decision, ThrotError> {
+        let application_id = match req.application_id {
+            Some(id) if !id.is_nil() => id,
+            Some(_) => {
+                return Err(ThrotError::Validation(
+                    "Application ID cannot be nil (00000000-0000-0000-0000-000000000000) in production evaluation requests".to_string(),
+                ));
+            }
+            None => {
+                return Err(ThrotError::Validation(
+                    "Application ID is required for rate limit evaluation. Call .with_application_id() before evaluating.".to_string(),
+                ));
+            }
+        };
+
         let cost = if req.cost == 0 { 1 } else { req.cost };
 
         // Resolve policy following strict 3-tier precedence:
@@ -142,33 +248,31 @@ impl RateLimitEngine {
         // 3. Application default policy
         let policy = if let Some(ref name) = req.policy_name {
             self.policy_store
-                .get_by_name(req.application_id, name)
+                .get_by_name(application_id, name)
                 .await?
                 .ok_or_else(|| {
                     ThrotError::PolicyNotFound(format!(
                         "Policy '{name}' not found for application {}",
-                        req.application_id
+                        application_id
                     ))
                 })?
         } else if let Some(assigned) = self
             .policy_store
-            .get_by_identity(req.application_id, &req.identity)
+            .get_by_identity(application_id, &req.identity)
             .await?
         {
             assigned
-        } else if let Some(default_policy) =
-            self.policy_store.get_default(req.application_id).await?
-        {
+        } else if let Some(default_policy) = self.policy_store.get_default(application_id).await? {
             default_policy
         } else {
             return Err(ThrotError::PolicyNotFound(format!(
                 "No matching rate-limit policy found for application {}",
-                req.application_id
+                application_id
             )));
         };
 
         debug!(
-            application_id = %req.application_id,
+            application_id = %application_id,
             policy_id = %policy.id,
             policy_name = %policy.name,
             identity = %req.identity,
@@ -178,7 +282,7 @@ impl RateLimitEngine {
 
         match self
             .evaluator
-            .evaluate_request(req.application_id, &policy, &req.identity, cost)
+            .evaluate_request(application_id, &policy, &req.identity, cost)
             .await
         {
             Ok(decision) => {

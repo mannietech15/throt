@@ -13,8 +13,9 @@ pub use app::Application;
 
 pub use decision::Decision;
 pub use engine::{
-    EvaluationRequest, InMemoryPolicyStore, PolicyStore, RateLimitEngine, RateLimitEvaluator,
+    EvaluationRequest, InMemoryPolicyStore, IntoIdentity, PolicyStore, RateLimitEngine,
+    RateLimitEvaluator,
 };
 pub use errors::ThrotError;
 pub use identity::Identity;
-pub use policy::{AlgorithmType, FailureMode, RateLimitPolicy};
+pub use policy::{AlgorithmType, FailureMode, RateLimitPolicy, RateLimitPolicyBuilder};

@@ -1916,6 +1916,7 @@ dependencies = [
  "redis",
  "sqlx",
  "thiserror",
+ "throt-algorithms",
  "throt-core",
  "tokio",
  "tracing",

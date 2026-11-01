@@ -44,6 +44,44 @@ impl RedisStorage {
         }
     }
 
+    /// Evaluates a rate limit check atomically via Redis Lua script.
+    pub async fn evaluate_fixed_window(
+        &self,
+        key: &str,
+        cost: u64,
+        limit: u64,
+        window_seconds: u64,
+    ) -> Result<throt_core::Decision, ThrotError> {
+        let mut conn = self.connection_manager.clone();
+        let script = redis::Script::new(throt_algorithms::FIXED_WINDOW_LUA_SCRIPT);
+
+        let result: Vec<i64> = script
+            .key(key)
+            .arg(cost)
+            .arg(limit)
+            .arg(window_seconds)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(|e| ThrotError::Storage(format!("Redis script execution failed: {e}")))?;
+
+        if result.len() < 4 {
+            return Err(ThrotError::Storage(
+                "Redis rate limit script returned invalid response format".to_string(),
+            ));
+        }
+
+        let allowed = result[0] == 1;
+        let remaining = result[1].max(0) as u64;
+        let reset_at = result[2];
+        let retry_after = result[3].max(0) as u64;
+
+        if allowed {
+            Ok(throt_core::Decision::allow(limit, remaining, reset_at))
+        } else {
+            Ok(throt_core::Decision::reject(limit, reset_at, retry_after))
+        }
+    }
+
     /// Returns a reference to the underlying Redis client.
     pub fn client(&self) -> &Client {
         &self.client

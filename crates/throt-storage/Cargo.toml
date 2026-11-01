@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 throt-core.workspace = true
+throt-algorithms.workspace = true
 sqlx.workspace = true
 redis.workspace = true
 tokio.workspace = true

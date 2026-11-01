@@ -161,3 +161,82 @@ async fn test_redis_leaky_bucket_flow() {
         .unwrap();
     assert!(d3.allowed);
 }
+
+#[tokio::test]
+async fn test_redis_sliding_log_flow() {
+    let evaluator = match get_evaluator().await {
+        Some(e) => e,
+        None => return,
+    };
+
+    let app_id = Uuid::new_v4();
+    let identity = Identity::new(format!("user:swl:{}", Uuid::new_v4())).unwrap();
+
+    let policy = RateLimitPolicy::builder("swl-redis", AlgorithmType::SlidingWindowLog)
+        .application_id(app_id)
+        .request_limit(4)
+        .window_seconds(60)
+        .build()
+        .unwrap();
+
+    // Consume 3 out of 4
+    let d1 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 3)
+        .await
+        .unwrap();
+    assert!(d1.allowed);
+    assert_eq!(d1.remaining, 1);
+
+    // Consume remaining 1
+    let d2 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 1)
+        .await
+        .unwrap();
+    assert!(d2.allowed);
+    assert_eq!(d2.remaining, 0);
+
+    // 5th rejected
+    let d3 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 1)
+        .await
+        .unwrap();
+    assert!(!d3.allowed);
+}
+
+#[tokio::test]
+async fn test_redis_sliding_counter_flow() {
+    let evaluator = match get_evaluator().await {
+        Some(e) => e,
+        None => return,
+    };
+
+    let app_id = Uuid::new_v4();
+    let identity = Identity::new(format!("user:swc:{}", Uuid::new_v4())).unwrap();
+
+    let policy = RateLimitPolicy::builder("swc-redis", AlgorithmType::SlidingWindowCounter)
+        .application_id(app_id)
+        .request_limit(10)
+        .window_seconds(60)
+        .build()
+        .unwrap();
+
+    let d1 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 6)
+        .await
+        .unwrap();
+    assert!(d1.allowed);
+    assert_eq!(d1.remaining, 4);
+
+    let d2 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 4)
+        .await
+        .unwrap();
+    assert!(d2.allowed);
+    assert_eq!(d2.remaining, 0);
+
+    let d3 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 1)
+        .await
+        .unwrap();
+    assert!(!d3.allowed);
+}

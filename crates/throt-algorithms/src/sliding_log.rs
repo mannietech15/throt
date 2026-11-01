@@ -1,6 +1,4 @@
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::RwLock;
 use throt_core::{Decision, RateLimitPolicy, ThrotError};
 
 use crate::RateLimiter;
@@ -54,7 +52,7 @@ end
 /// In-memory sliding window log rate limiter.
 #[derive(Default)]
 pub struct SlidingLogRateLimiter {
-    state: RwLock<HashMap<String, Vec<i64>>>,
+    state: crate::sharded::ShardedState<Vec<i64>>,
 }
 
 impl SlidingLogRateLimiter {
@@ -75,7 +73,8 @@ impl SlidingLogRateLimiter {
         let threshold_ms = now_ms - window_ms;
         let current_sec = now_ms / 1000;
 
-        let mut logs = self.state.write().unwrap();
+        let shard = self.state.get_shard(key);
+        let mut logs = shard.write().unwrap();
         let log = logs.entry(key.to_string()).or_default();
 
         // Prune timestamps older than threshold
@@ -112,6 +111,20 @@ impl RateLimiter for SlidingLogRateLimiter {
     ) -> Result<Decision, ThrotError> {
         let now_ms = chrono::Utc::now().timestamp_millis();
         self.evaluate_at(key, cost, policy, now_ms)
+    }
+}
+
+#[async_trait]
+impl throt_core::RateLimitEvaluator for SlidingLogRateLimiter {
+    async fn evaluate_request(
+        &self,
+        application_id: uuid::Uuid,
+        policy: &RateLimitPolicy,
+        identity: &throt_core::Identity,
+        cost: u64,
+    ) -> Result<Decision, ThrotError> {
+        let key = format!("throt:{{{}:{}}}:{}", application_id, policy.id, identity);
+        self.evaluate(&key, cost, policy).await
     }
 }
 

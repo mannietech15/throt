@@ -1,6 +1,4 @@
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::RwLock;
 use throt_core::{Decision, RateLimitPolicy, ThrotError};
 
 use crate::RateLimiter;
@@ -53,7 +51,7 @@ struct WindowCounts {
 /// In-memory sliding window counter rate limiter.
 #[derive(Default)]
 pub struct SlidingCounterRateLimiter {
-    state: RwLock<HashMap<String, WindowCounts>>,
+    state: crate::sharded::ShardedState<WindowCounts>,
 }
 
 impl SlidingCounterRateLimiter {
@@ -75,7 +73,8 @@ impl SlidingCounterRateLimiter {
         let reset_at = current_window + window_sec;
         let retry_after = (reset_at - now_sec).max(1) as u64;
 
-        let mut buckets = self.state.write().unwrap();
+        let shard = self.state.get_shard(key);
+        let mut buckets = shard.write().unwrap();
         let bucket = buckets.entry(key.to_string()).or_insert(WindowCounts {
             current_window,
             current_count: 0,
@@ -117,6 +116,20 @@ impl RateLimiter for SlidingCounterRateLimiter {
     ) -> Result<Decision, ThrotError> {
         let now_sec = chrono::Utc::now().timestamp();
         self.evaluate_at(key, cost, policy, now_sec)
+    }
+}
+
+#[async_trait]
+impl throt_core::RateLimitEvaluator for SlidingCounterRateLimiter {
+    async fn evaluate_request(
+        &self,
+        application_id: uuid::Uuid,
+        policy: &RateLimitPolicy,
+        identity: &throt_core::Identity,
+        cost: u64,
+    ) -> Result<Decision, ThrotError> {
+        let key = format!("throt:{{{}:{}}}:{}", application_id, policy.id, identity);
+        self.evaluate(&key, cost, policy).await
     }
 }
 

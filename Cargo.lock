@@ -2352,6 +2352,7 @@ dependencies = [
  "criterion",
  "thiserror 2.0.21",
  "throt-core",
+ "tokio",
  "tracing",
  "uuid",
 ]

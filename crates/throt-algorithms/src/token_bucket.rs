@@ -1,6 +1,4 @@
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::RwLock;
 use throt_core::{Decision, RateLimitPolicy, ThrotError};
 
 use crate::RateLimiter;
@@ -55,7 +53,7 @@ struct BucketState {
 /// In-memory Token Bucket rate limiter.
 #[derive(Default)]
 pub struct TokenBucketRateLimiter {
-    state: RwLock<HashMap<String, BucketState>>,
+    state: crate::sharded::ShardedState<BucketState>,
 }
 
 impl TokenBucketRateLimiter {
@@ -81,7 +79,8 @@ impl TokenBucketRateLimiter {
             ));
         }
 
-        let mut buckets = self.state.write().unwrap();
+        let shard = self.state.get_shard(key);
+        let mut buckets = shard.write().unwrap();
         let bucket = buckets.entry(key.to_string()).or_insert(BucketState {
             tokens: capacity,
             last_updated_secs: now_secs,
@@ -116,6 +115,20 @@ impl RateLimiter for TokenBucketRateLimiter {
     ) -> Result<Decision, ThrotError> {
         let now_secs = chrono::Utc::now().timestamp_micros() as f64 / 1_000_000.0;
         self.evaluate_at(key, cost, policy, now_secs)
+    }
+}
+
+#[async_trait]
+impl throt_core::RateLimitEvaluator for TokenBucketRateLimiter {
+    async fn evaluate_request(
+        &self,
+        application_id: uuid::Uuid,
+        policy: &RateLimitPolicy,
+        identity: &throt_core::Identity,
+        cost: u64,
+    ) -> Result<Decision, ThrotError> {
+        let key = format!("throt:{{{}:{}}}:{}", application_id, policy.id, identity);
+        self.evaluate(&key, cost, policy).await
     }
 }
 

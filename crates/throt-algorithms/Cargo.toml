@@ -15,6 +15,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+tokio.workspace = true
 
 [[bench]]
 name = "algorithms_bench"

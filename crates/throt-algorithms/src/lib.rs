@@ -16,12 +16,15 @@ pub trait RateLimiter: Send + Sync {
 }
 
 pub mod fixed_window;
+pub mod in_memory;
 pub mod leaky_bucket;
+pub(crate) mod sharded;
 pub mod sliding_counter;
 pub mod sliding_log;
 pub mod token_bucket;
 
 pub use fixed_window::{FixedWindowRateLimiter, FIXED_WINDOW_LUA_SCRIPT};
+pub use in_memory::InMemoryRateLimitEvaluator;
 pub use leaky_bucket::{LeakyBucketRateLimiter, LEAKY_BUCKET_LUA_SCRIPT};
 pub use sliding_counter::{SlidingCounterRateLimiter, SLIDING_COUNTER_LUA_SCRIPT};
 pub use sliding_log::{SlidingLogRateLimiter, SLIDING_LOG_LUA_SCRIPT};

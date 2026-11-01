@@ -1,6 +1,4 @@
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::RwLock;
 use throt_core::{Decision, RateLimitPolicy, ThrotError};
 
 use crate::RateLimiter;
@@ -56,7 +54,7 @@ struct LeakyBucketState {
 /// In-memory Leaky Bucket (Policing Meter) rate limiter.
 #[derive(Default)]
 pub struct LeakyBucketRateLimiter {
-    state: RwLock<HashMap<String, LeakyBucketState>>,
+    state: crate::sharded::ShardedState<LeakyBucketState>,
 }
 
 impl LeakyBucketRateLimiter {
@@ -82,7 +80,8 @@ impl LeakyBucketRateLimiter {
             ));
         }
 
-        let mut buckets = self.state.write().unwrap();
+        let shard = self.state.get_shard(key);
+        let mut buckets = shard.write().unwrap();
         let bucket = buckets.entry(key.to_string()).or_insert(LeakyBucketState {
             water: 0.0,
             last_leak_secs: now_secs,
@@ -117,6 +116,20 @@ impl RateLimiter for LeakyBucketRateLimiter {
     ) -> Result<Decision, ThrotError> {
         let now_secs = chrono::Utc::now().timestamp_micros() as f64 / 1_000_000.0;
         self.evaluate_at(key, cost, policy, now_secs)
+    }
+}
+
+#[async_trait]
+impl throt_core::RateLimitEvaluator for LeakyBucketRateLimiter {
+    async fn evaluate_request(
+        &self,
+        application_id: uuid::Uuid,
+        policy: &RateLimitPolicy,
+        identity: &throt_core::Identity,
+        cost: u64,
+    ) -> Result<Decision, ThrotError> {
+        let key = format!("throt:{{{}:{}}}:{}", application_id, policy.id, identity);
+        self.evaluate(&key, cost, policy).await
     }
 }
 

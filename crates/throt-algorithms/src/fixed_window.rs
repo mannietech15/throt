@@ -1,6 +1,4 @@
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::RwLock;
 use throt_core::{Decision, RateLimitPolicy, ThrotError};
 
 use crate::RateLimiter;
@@ -18,13 +16,19 @@ local reset_at = window_start + window_sec
 local ttl = reset_at - current_sec
 if ttl <= 0 then ttl = 1 end
 
-local current_val = tonumber(redis.call('GET', KEYS[1]) or '0')
+local data = redis.call('HMGET', KEYS[1], 'w', 'c')
+local stored_window = tonumber(data[1] or '0')
+local current_val = tonumber(data[2] or '0')
+
+if stored_window ~= window_start then
+    stored_window = window_start
+    current_val = 0
+end
 
 if current_val + cost <= limit then
-    local new_val = redis.call('INCRBY', KEYS[1], cost)
-    if current_val == 0 then
-        redis.call('EXPIRE', KEYS[1], ttl)
-    end
+    local new_val = current_val + cost
+    redis.call('HMSET', KEYS[1], 'w', stored_window, 'c', new_val)
+    redis.call('EXPIRE', KEYS[1], ttl + 1)
     return { 1, limit - new_val, reset_at, 0 }
 else
     return { 0, 0, reset_at, ttl }
@@ -43,7 +47,7 @@ struct BucketState {
 /// and distributed atomic Redis evaluation.
 #[derive(Default)]
 pub struct FixedWindowRateLimiter {
-    state: RwLock<HashMap<String, BucketState>>,
+    state: crate::sharded::ShardedState<BucketState>,
 }
 
 impl FixedWindowRateLimiter {
@@ -71,7 +75,8 @@ impl FixedWindowRateLimiter {
         let reset_at = window_start + window_secs;
         let retry_after = (reset_at - now_secs).max(1) as u64;
 
-        let mut buckets = self.state.write().unwrap();
+        let shard = self.state.get_shard(key);
+        let mut buckets = shard.write().unwrap();
         let bucket = buckets.entry(key.to_string()).or_insert(BucketState {
             counter: 0,
             window_start,
@@ -116,7 +121,7 @@ impl throt_core::RateLimitEvaluator for FixedWindowRateLimiter {
         identity: &throt_core::Identity,
         cost: u64,
     ) -> Result<Decision, ThrotError> {
-        let key = format!("throt:{}:{}:{}", application_id, policy.id, identity);
+        let key = format!("throt:{{{}:{}}}:{}", application_id, policy.id, identity);
         self.evaluate(&key, cost, policy).await
     }
 }

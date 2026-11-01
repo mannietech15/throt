@@ -7,3 +7,4 @@ pub mod redis;
 pub use evaluator::RedisRateLimitEvaluator;
 pub use postgres::PostgresPool;
 pub use redis::RedisStorage;
+pub use throt_algorithms::InMemoryRateLimitEvaluator;

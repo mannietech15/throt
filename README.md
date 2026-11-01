@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="throt.png" alt="THROT - API Rate Limiting" width="100%" />
+</p>
+
 # THROT
 
 > **Control the Flow. Protect the Core.**
@@ -23,6 +27,10 @@ THROT is a high-performance, distributed API rate-limiting engine written in Rus
 ---
 
 ## Architecture Overview
+
+<p align="center">
+  <img src="2.png" alt="THROT Architecture Overview" width="100%" />
+</p>
 
 ```text
                Client Applications

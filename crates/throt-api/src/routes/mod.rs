@@ -2,11 +2,13 @@ pub mod api_keys;
 pub mod apps;
 pub mod health;
 pub mod limits;
+pub mod metrics;
 pub mod policies;
 
 use axum::middleware;
 use axum::routing::{delete, get, post};
 use axum::Router;
+use metrics_exporter_prometheus::PrometheusHandle;
 use std::sync::Arc;
 use throt_core::RateLimitEngine;
 use throt_storage::PostgresPool;
@@ -18,6 +20,7 @@ use api_keys::{
 use apps::{get_current_app_handler, register_app_handler, AppApiState};
 use health::{health_router, AppState};
 use limits::{evaluate_handler, LimitsState};
+use metrics::{metrics_handler, MetricsState};
 use policies::{create_policy_handler, get_policy_handler, list_policies_handler, PolicyApiState};
 
 /// Builds the complete THROT HTTP API router.
@@ -25,9 +28,19 @@ pub fn create_router(
     app_state: Arc<AppState>,
     engine: Arc<RateLimitEngine>,
     postgres: Option<PostgresPool>,
+    metrics_handle: Option<PrometheusHandle>,
 ) -> Router {
     // 1. Public health router (/health, /ready)
     let mut router = health_router(app_state);
+
+    // 2. Metrics endpoint (/metrics)
+    if let Some(handle) = metrics_handle {
+        let metrics_state = Arc::new(MetricsState { handle });
+        let metrics_router = Router::new()
+            .route("/metrics", get(metrics_handler))
+            .with_state(metrics_state);
+        router = router.merge(metrics_router);
+    }
 
     // 2. Public application registration route (POST /v1/apps)
     if let Some(ref pg) = postgres {

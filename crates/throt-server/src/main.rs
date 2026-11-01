@@ -68,8 +68,13 @@ async fn main() -> anyhow::Result<()> {
 
     let engine = Arc::new(throt_core::RateLimitEngine::new(policy_store, evaluator));
 
+    // Initialize Prometheus metrics recorder
+    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .install_recorder()
+        .ok();
+
     // Build Axum application router
-    let app = throt_api::create_router(app_state, engine, postgres_pool)
+    let app = throt_api::create_router(app_state, engine, postgres_pool, metrics_handle)
         .layer(TraceLayer::new_for_http());
 
     let addr = config.socket_addr()?;

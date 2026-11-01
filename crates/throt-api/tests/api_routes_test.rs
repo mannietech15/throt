@@ -19,7 +19,7 @@ async fn test_auth_middleware_rejects_missing_key() {
     let evaluator = Arc::new(throt_algorithms::FixedWindowRateLimiter::new());
     let engine = Arc::new(RateLimitEngine::new(policy_store, evaluator));
 
-    let app = create_router(app_state, engine, None);
+    let app = create_router(app_state, engine, None, None);
 
     let req_body = json!({
         "identity": "user:123",
@@ -69,7 +69,7 @@ async fn test_evaluate_endpoint_end_to_end() {
     let evaluator = Arc::new(throt_algorithms::FixedWindowRateLimiter::new());
     let engine = Arc::new(RateLimitEngine::new(policy_store, evaluator));
 
-    let app = create_router(app_state, engine, None);
+    let app = create_router(app_state, engine, None, None);
 
     let req_body = json!({
         "identity": "user:test_client",
@@ -109,7 +109,7 @@ async fn test_evaluate_endpoint_policy_not_found() {
     let evaluator = Arc::new(throt_algorithms::FixedWindowRateLimiter::new());
     let engine = Arc::new(RateLimitEngine::new(policy_store, evaluator));
 
-    let app = create_router(app_state, engine, None);
+    let app = create_router(app_state, engine, None, None);
 
     let req_body = json!({
         "identity": "user:test_client",
@@ -143,7 +143,7 @@ async fn test_evaluate_endpoint_invalid_identity() {
     let evaluator = Arc::new(throt_algorithms::FixedWindowRateLimiter::new());
     let engine = Arc::new(RateLimitEngine::new(policy_store, evaluator));
 
-    let app = create_router(app_state, engine, None);
+    let app = create_router(app_state, engine, None, None);
 
     let req_body = json!({
         "identity": "   ",
@@ -165,4 +165,33 @@ async fn test_evaluate_endpoint_invalid_identity() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_metrics_endpoint() {
+    let app_state = Arc::new(AppState {
+        redis: None,
+        postgres: None,
+    });
+    let policy_store = Arc::new(InMemoryPolicyStore::new());
+    let evaluator = Arc::new(throt_algorithms::FixedWindowRateLimiter::new());
+    let engine = Arc::new(RateLimitEngine::new(policy_store, evaluator));
+
+    let recorder = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
+    let handle = recorder.handle();
+
+    let app = create_router(app_state, engine, None, Some(handle));
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
 }

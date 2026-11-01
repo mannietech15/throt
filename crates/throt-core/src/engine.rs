@@ -181,13 +181,27 @@ impl RateLimitEngine {
             .evaluate_request(req.application_id, &policy, &req.identity, cost)
             .await
         {
-            Ok(decision) => Ok(decision),
+            Ok(decision) => {
+                metrics::counter!(
+                    "throt_evaluations_total",
+                    "algorithm" => format!("{:?}", policy.algorithm),
+                    "allowed" => decision.allowed.to_string()
+                )
+                .increment(1);
+                Ok(decision)
+            }
             Err(e) => {
                 warn!(
                     error = %e,
                     failure_mode = ?policy.failure_mode,
                     "Rate limit evaluation failed; evaluating fallback policy"
                 );
+
+                metrics::counter!(
+                    "throt_evaluations_fallback_total",
+                    "mode" => format!("{:?}", policy.failure_mode)
+                )
+                .increment(1);
 
                 match policy.failure_mode {
                     FailureMode::FailOpen => {

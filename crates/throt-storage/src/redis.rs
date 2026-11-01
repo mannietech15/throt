@@ -44,22 +44,23 @@ impl RedisStorage {
         }
     }
 
-    /// Evaluates a rate limit check atomically via Redis Lua script.
-    pub async fn evaluate_fixed_window(
+    /// Helper to execute a 4-integer-returning rate-limit Lua script.
+    async fn execute_rate_script(
         &self,
+        script_src: &str,
         key: &str,
-        cost: u64,
         limit: u64,
-        window_seconds: u64,
+        args: &[String],
     ) -> Result<throt_core::Decision, ThrotError> {
         let mut conn = self.connection_manager.clone();
-        let script = redis::Script::new(throt_algorithms::FIXED_WINDOW_LUA_SCRIPT);
+        let script = redis::Script::new(script_src);
+        let mut invocation = script.prepare_invoke();
+        invocation.key(key);
+        for arg in args {
+            invocation.arg(arg);
+        }
 
-        let result: Vec<i64> = script
-            .key(key)
-            .arg(cost)
-            .arg(limit)
-            .arg(window_seconds)
+        let result: Vec<i64> = invocation
             .invoke_async(&mut conn)
             .await
             .map_err(|e| ThrotError::Storage(format!("Redis script execution failed: {e}")))?;
@@ -80,6 +81,106 @@ impl RedisStorage {
         } else {
             Ok(throt_core::Decision::reject(limit, reset_at, retry_after))
         }
+    }
+
+    /// Evaluates Fixed Window Counter atomically.
+    pub async fn evaluate_fixed_window(
+        &self,
+        key: &str,
+        cost: u64,
+        limit: u64,
+        window_seconds: u64,
+    ) -> Result<throt_core::Decision, ThrotError> {
+        let args = vec![
+            cost.to_string(),
+            limit.to_string(),
+            window_seconds.to_string(),
+        ];
+        self.execute_rate_script(throt_algorithms::FIXED_WINDOW_LUA_SCRIPT, key, limit, &args)
+            .await
+    }
+
+    /// Evaluates Sliding Window Log atomically.
+    pub async fn evaluate_sliding_log(
+        &self,
+        key: &str,
+        cost: u64,
+        limit: u64,
+        window_seconds: u64,
+    ) -> Result<throt_core::Decision, ThrotError> {
+        let args = vec![
+            cost.to_string(),
+            limit.to_string(),
+            window_seconds.to_string(),
+        ];
+        self.execute_rate_script(throt_algorithms::SLIDING_LOG_LUA_SCRIPT, key, limit, &args)
+            .await
+    }
+
+    /// Evaluates Sliding Window Counter atomically.
+    pub async fn evaluate_sliding_counter(
+        &self,
+        key: &str,
+        cost: u64,
+        limit: u64,
+        window_seconds: u64,
+    ) -> Result<throt_core::Decision, ThrotError> {
+        let args = vec![
+            cost.to_string(),
+            limit.to_string(),
+            window_seconds.to_string(),
+        ];
+        self.execute_rate_script(
+            throt_algorithms::SLIDING_COUNTER_LUA_SCRIPT,
+            key,
+            limit,
+            &args,
+        )
+        .await
+    }
+
+    /// Evaluates Token Bucket atomically.
+    pub async fn evaluate_token_bucket(
+        &self,
+        key: &str,
+        cost: u64,
+        capacity: u64,
+        refill_rate: f64,
+    ) -> Result<throt_core::Decision, ThrotError> {
+        let args = vec![
+            cost.to_string(),
+            capacity.to_string(),
+            refill_rate.to_string(),
+        ];
+        self.execute_rate_script(
+            throt_algorithms::TOKEN_BUCKET_LUA_SCRIPT,
+            key,
+            capacity,
+            &args,
+        )
+        .await
+    }
+
+    /// Evaluates Leaky Bucket (Policing) atomically.
+    pub async fn evaluate_leaky_bucket(
+        &self,
+        key: &str,
+        cost: u64,
+        capacity: u64,
+        leak_rate: f64,
+    ) -> Result<throt_core::Decision, ThrotError> {
+        let args = vec![
+            cost.to_string(),
+            capacity.to_string(),
+            leak_rate.to_string(),
+        ];
+        self.execute_rate_script(
+            throt_algorithms::LEAKY_BUCKET_LUA_SCRIPT,
+            key,
+            capacity,
+            &args,
+        )
+        .await
     }
 
     /// Returns a reference to the underlying Redis client.

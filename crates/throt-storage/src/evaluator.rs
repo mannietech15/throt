@@ -39,10 +39,39 @@ impl RateLimitEvaluator for RedisRateLimitEvaluator {
                     .evaluate_fixed_window(&key, cost, policy.request_limit, policy.window_seconds)
                     .await
             }
-            other => Err(ThrotError::Internal(format!(
-                "Algorithm '{:?}' not yet registered in Redis evaluator",
-                other
-            ))),
+            AlgorithmType::SlidingWindowLog => {
+                self.redis
+                    .evaluate_sliding_log(&key, cost, policy.request_limit, policy.window_seconds)
+                    .await
+            }
+            AlgorithmType::SlidingWindowCounter => {
+                self.redis
+                    .evaluate_sliding_counter(
+                        &key,
+                        cost,
+                        policy.request_limit,
+                        policy.window_seconds,
+                    )
+                    .await
+            }
+            AlgorithmType::TokenBucket => {
+                let capacity = policy.burst_capacity.unwrap_or(policy.request_limit);
+                let refill_rate = policy
+                    .refill_rate
+                    .unwrap_or(policy.request_limit as f64 / policy.window_seconds as f64);
+                self.redis
+                    .evaluate_token_bucket(&key, cost, capacity, refill_rate)
+                    .await
+            }
+            AlgorithmType::LeakyBucket => {
+                let capacity = policy.burst_capacity.unwrap_or(policy.request_limit);
+                let leak_rate = policy
+                    .refill_rate
+                    .unwrap_or(policy.request_limit as f64 / policy.window_seconds as f64);
+                self.redis
+                    .evaluate_leaky_bucket(&key, cost, capacity, leak_rate)
+                    .await
+            }
         }
     }
 }

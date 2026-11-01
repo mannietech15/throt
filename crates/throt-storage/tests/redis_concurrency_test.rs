@@ -3,22 +3,22 @@ use throt_core::{AlgorithmType, FailureMode, Identity, RateLimitEvaluator, RateL
 use throt_storage::{RedisRateLimitEvaluator, RedisStorage};
 use uuid::Uuid;
 
-#[tokio::test]
-async fn test_redis_atomic_concurrency_protection() {
+async fn get_evaluator() -> Option<Arc<RedisRateLimitEvaluator>> {
     let redis_url =
         std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
-    let redis = match RedisStorage::connect(&redis_url).await {
-        Ok(storage) => storage,
-        Err(_) => {
-            eprintln!(
-                "Skipping Redis integration test: Redis not reachable on {}",
-                redis_url
-            );
-            return;
-        }
+    match RedisStorage::connect(&redis_url).await {
+        Ok(storage) => Some(Arc::new(RedisRateLimitEvaluator::new(storage))),
+        Err(_) => None,
+    }
+}
+
+#[tokio::test]
+async fn test_redis_fixed_window_concurrency() {
+    let evaluator = match get_evaluator().await {
+        Some(e) => e,
+        None => return,
     };
 
-    let evaluator = Arc::new(RedisRateLimitEvaluator::new(redis));
     let app_id = Uuid::new_v4();
     let policy_id = Uuid::new_v4();
     let identity = Identity::new(format!("user:concurrent:{}", Uuid::new_v4())).unwrap();
@@ -26,7 +26,7 @@ async fn test_redis_atomic_concurrency_protection() {
     let policy = RateLimitPolicy {
         id: policy_id,
         application_id: app_id,
-        name: "concurrency-test".to_string(),
+        name: "fixed-window-concurrency".to_string(),
         algorithm: AlgorithmType::FixedWindow,
         request_limit: 10,
         window_seconds: 60,
@@ -38,8 +38,6 @@ async fn test_redis_atomic_concurrency_protection() {
     };
 
     let mut handles = Vec::new();
-
-    // Spawn 20 concurrent tasks all attempting to consume 1 token simultaneously
     for _ in 0..20 {
         let eval = evaluator.clone();
         let pol = policy.clone();
@@ -50,29 +48,116 @@ async fn test_redis_atomic_concurrency_protection() {
         }));
     }
 
-    let mut allowed_count = 0;
-    let mut rejected_count = 0;
-
+    let mut allowed = 0;
+    let mut rejected = 0;
     for handle in handles {
-        let decision = handle
-            .await
-            .unwrap()
-            .expect("Redis evaluation must succeed");
-        if decision.allowed {
-            allowed_count += 1;
+        let d = handle.await.unwrap().unwrap();
+        if d.allowed {
+            allowed += 1;
         } else {
-            rejected_count += 1;
-            assert!(decision.retry_after.unwrap() > 0);
+            rejected += 1;
+            assert!(d.retry_after.unwrap() > 0);
         }
     }
 
-    // Exactly 10 allowed and exactly 10 rejected
-    assert_eq!(
-        allowed_count, 10,
-        "Concurrency race condition detected: more than configured limit allowed!"
-    );
-    assert_eq!(
-        rejected_count, 10,
-        "Rejections count mismatch: expected 10 rejected requests"
-    );
+    assert_eq!(allowed, 10);
+    assert_eq!(rejected, 10);
+}
+
+#[tokio::test]
+async fn test_redis_token_bucket_flow() {
+    let evaluator = match get_evaluator().await {
+        Some(e) => e,
+        None => return,
+    };
+
+    let app_id = Uuid::new_v4();
+    let policy_id = Uuid::new_v4();
+    let identity = Identity::new(format!("user:tb:{}", Uuid::new_v4())).unwrap();
+
+    let policy = RateLimitPolicy {
+        id: policy_id,
+        application_id: app_id,
+        name: "token-bucket-redis".to_string(),
+        algorithm: AlgorithmType::TokenBucket,
+        request_limit: 5,
+        window_seconds: 60,
+        burst_capacity: Some(5),
+        refill_rate: Some(10.0), // 10 tokens/sec
+        failure_mode: FailureMode::FailClosed,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+
+    // Consume all 5 burst tokens
+    let d1 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 5)
+        .await
+        .unwrap();
+    assert!(d1.allowed);
+    assert_eq!(d1.remaining, 0);
+
+    // Immediate next token rejected
+    let d2 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 1)
+        .await
+        .unwrap();
+    assert!(!d2.allowed);
+
+    // Sleep 250ms -> 2.5 tokens replenished at 10/sec
+    tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+    let d3 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 2)
+        .await
+        .unwrap();
+    assert!(d3.allowed);
+}
+
+#[tokio::test]
+async fn test_redis_leaky_bucket_flow() {
+    let evaluator = match get_evaluator().await {
+        Some(e) => e,
+        None => return,
+    };
+
+    let app_id = Uuid::new_v4();
+    let policy_id = Uuid::new_v4();
+    let identity = Identity::new(format!("user:lb:{}", Uuid::new_v4())).unwrap();
+
+    let policy = RateLimitPolicy {
+        id: policy_id,
+        application_id: app_id,
+        name: "leaky-bucket-redis".to_string(),
+        algorithm: AlgorithmType::LeakyBucket,
+        request_limit: 3,
+        window_seconds: 60,
+        burst_capacity: Some(3),
+        refill_rate: Some(5.0), // 5 units leak per sec
+        failure_mode: FailureMode::FailClosed,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+
+    // Fill capacity with 3 units
+    let d1 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 3)
+        .await
+        .unwrap();
+    assert!(d1.allowed);
+    assert_eq!(d1.remaining, 0);
+
+    // 4th unit rejected
+    let d2 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 1)
+        .await
+        .unwrap();
+    assert!(!d2.allowed);
+
+    // Wait 300ms -> 1.5 units leak out
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+    let d3 = evaluator
+        .evaluate_request(app_id, &policy, &identity, 1)
+        .await
+        .unwrap();
+    assert!(d3.allowed);
 }

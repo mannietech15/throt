@@ -22,3 +22,7 @@ pub mod sliding_log;
 pub mod token_bucket;
 
 pub use fixed_window::{FixedWindowRateLimiter, FIXED_WINDOW_LUA_SCRIPT};
+pub use leaky_bucket::{LeakyBucketRateLimiter, LEAKY_BUCKET_LUA_SCRIPT};
+pub use sliding_counter::{SlidingCounterRateLimiter, SLIDING_COUNTER_LUA_SCRIPT};
+pub use sliding_log::{SlidingLogRateLimiter, SLIDING_LOG_LUA_SCRIPT};
+pub use token_bucket::{TokenBucketRateLimiter, TOKEN_BUCKET_LUA_SCRIPT};

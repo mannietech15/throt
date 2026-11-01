@@ -20,3 +20,5 @@ pub mod leaky_bucket;
 pub mod sliding_counter;
 pub mod sliding_log;
 pub mod token_bucket;
+
+pub use fixed_window::{FixedWindowRateLimiter, FIXED_WINDOW_LUA_SCRIPT};

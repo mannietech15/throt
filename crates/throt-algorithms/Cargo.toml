@@ -9,4 +9,6 @@ license.workspace = true
 throt-core.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
 tracing.workspace = true

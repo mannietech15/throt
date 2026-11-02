@@ -48,9 +48,15 @@
     "security"
   ],
   "author": "Mannie <mannietech817@gmail.com>",
-  "license": "MIT OR Apache-2.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mannietech15/throt.git"
+    "url": "git+https://github.com/mannietech15/throt.git"
   }
 }
+

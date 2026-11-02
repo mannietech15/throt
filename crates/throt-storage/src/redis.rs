@@ -16,9 +16,14 @@ impl RedisStorage {
         let client = Client::open(redis_url)
             .map_err(|e| ThrotError::Storage(format!("Invalid Redis URL: {e}")))?;
 
-        let connection_manager = ConnectionManager::new(client.clone())
-            .await
-            .map_err(|e| ThrotError::Storage(format!("Failed to connect to Redis: {e}")))?;
+        let connect_fut = ConnectionManager::new(client.clone());
+        let connection_manager =
+            tokio::time::timeout(std::time::Duration::from_secs(3), connect_fut)
+                .await
+                .map_err(|_| {
+                    ThrotError::Storage("Connection to Redis timed out after 3 seconds".to_string())
+                })?
+                .map_err(|e| ThrotError::Storage(format!("Failed to connect to Redis: {e}")))?;
 
         info!("Successfully connected to Redis distributed store");
         Ok(Self {

@@ -51,9 +51,13 @@ jobs:
         run: cargo test --workspace
 
   test-node:
-    name: Node.js In-Process Integration Tests
+    name: Node.js Tests - Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
     needs: test-rust
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
     services:
       redis:
         image: redis:7-alpine
@@ -64,7 +68,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install npm dependencies
+        run: npm install
 
       - name: Build Native Addon
         run: |
@@ -76,3 +83,61 @@ jobs:
 
       - name: Run Node.js Benchmarks
         run: npm run bench
+
+  verify-native-platforms:
+    name: Verify Native Platform - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    needs: test-rust
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            is_cross: false
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            is_cross: true
+          - os: macos-13
+            target: x86_64-apple-darwin
+            is_cross: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            is_cross: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            is_cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install aarch64 cross-linker (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build throt-napi for ${{ matrix.target }}
+        run: cargo build -p throt-napi --release --target ${{ matrix.target }}
+
+      - name: Test Native Addon on Host OS
+        if: matrix.is_cross == false
+        shell: bash
+        run: |
+          npm install
+          mkdir -p packages/node
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp target/${{ matrix.target }}/release/throt_napi.dll packages/node/throt.node
+          elif [[ "${{ matrix.os }}" == "macos-13" || "${{ matrix.os }}" == "macos-latest" ]]; then
+            cp target/${{ matrix.target }}/release/libthrot_napi.dylib packages/node/throt.node
+          else
+            cp target/${{ matrix.target }}/release/libthrot_napi.so packages/node/throt.node
+          fi
+          npm test
+

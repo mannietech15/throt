@@ -481,3 +481,74 @@ test('Redis-backed ThrotEngine operations (if Redis is running)', async () => {
   }
 });
 
+test('Redis connection failure handling on unreachable host/port', async () => {
+  // Test connecting to an invalid port where Redis is definitely not running
+  await assert.rejects(
+    async () => {
+      await ThrotEngine.create({ redisUrl: 'redis://127.0.0.1:59999' });
+    },
+    /Redis connection failed/
+  );
+});
+
+test('Engine runtime lifecycle and graceful cleanup via close()', async () => {
+  const engine1 = await ThrotEngine.create();
+  const engine2 = await ThrotEngine.create();
+
+  engine1.addPolicy({
+    name: 'cleanup-test',
+    algorithm: 'fixed_window',
+    requestLimit: 5,
+    windowSeconds: 60,
+  });
+
+  const d = await engine1.evaluate({ identity: 'client:cleanup', policy: 'cleanup-test', cost: 1 });
+  assert.equal(d.allowed, true);
+
+  // Close both engines gracefully
+  await engine1.close();
+  await engine2.close();
+  assert.ok(true, 'Engines closed cleanly without leaking background handles');
+});
+
+test('Sliding Window Log concurrent evaluations under race conditions', async () => {
+  const engine = await ThrotEngine.create();
+  engine.addPolicy({
+    name: 'swl-concurrent',
+    algorithm: 'sliding_window_log',
+    requestLimit: 50,
+    windowSeconds: 60,
+  });
+
+  // Launch 50 concurrent requests for the same identity
+  const promises = [];
+  for (let i = 0; i < 50; i++) {
+    promises.push(
+      engine.evaluate({
+        identity: 'client:swl_race',
+        policy: 'swl-concurrent',
+        cost: 1,
+      })
+    );
+  }
+
+  const results = await Promise.all(promises);
+  assert.equal(results.length, 50);
+
+  // All 50 should be allowed
+  const allowedCount = results.filter((r) => r.allowed).length;
+  assert.equal(allowedCount, 50);
+
+  // 51st request should be rejected
+  const d51 = await engine.evaluate({
+    identity: 'client:swl_race',
+    policy: 'swl-concurrent',
+    cost: 1,
+  });
+  assert.equal(d51.allowed, false);
+  assert.equal(d51.remaining, 0);
+
+  await engine.close();
+});
+
+

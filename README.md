@@ -427,10 +427,14 @@ Precompiled native packages are built and verified for the following targets:
 
 ### Node.js Version Support
 
-- **Node.js 18.x LTS**
-- **Node.js 20.x LTS**
-- **Node.js 22.x LTS**
-- **Node.js 24.x Current**
+THROT's NAPI-RS native bindings target active and current Node.js release lines:
+
+- **Node.js 22.x LTS** (Active LTS)
+- **Node.js 24.x LTS** (Active LTS)
+- **Node.js 26.x Current** (Node-API v9 ABI-stable forward compatible)
+
+*(Note: Node.js 18 and 20 are End-of-Life and are not supported for production deployments).*
+
 
 ---
 

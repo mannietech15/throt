@@ -267,6 +267,187 @@ test('Fastify plugin allow and 429 rejection hook', async () => {
   assert.equal(reply2Body.statusCode, 429);
 });
 
+test('In-memory SlidingWindowLog rolling eviction & precision', async () => {
+  const engine = await ThrotEngine.create();
+  engine.addPolicy({
+    name: 'swl-policy',
+    algorithm: 'sliding_window_log',
+    requestLimit: 3,
+    windowSeconds: 2,
+  });
+
+  // Request 1: allowed, remaining 2
+  const d1 = await engine.evaluate({ identity: 'client:swl', policy: 'swl-policy', cost: 1 });
+  assert.equal(d1.allowed, true);
+  assert.equal(d1.limit, 3);
+  assert.equal(d1.remaining, 2);
+
+  // Request 2: allowed, remaining 1
+  const d2 = await engine.evaluate({ identity: 'client:swl', policy: 'swl-policy', cost: 1 });
+  assert.equal(d2.allowed, true);
+  assert.equal(d2.remaining, 1);
+
+  // Request 3: allowed, remaining 0
+  const d3 = await engine.evaluate({ identity: 'client:swl', policy: 'swl-policy', cost: 1 });
+  assert.equal(d3.allowed, true);
+  assert.equal(d3.remaining, 0);
+
+  // Request 4: rejected (capacity reached)
+  const d4 = await engine.evaluate({ identity: 'client:swl', policy: 'swl-policy', cost: 1 });
+  assert.equal(d4.allowed, false);
+  assert.ok(d4.retryAfter >= 1, 'retryAfter should be at least 1s');
+  assert.ok(d4.resetAt > Math.floor(Date.now() / 1000) - 5);
+
+  // Wait for window expiration (2.1s)
+  await new Promise((resolve) => setTimeout(resolve, 2100));
+
+  // Request 5: should now be allowed as old timestamps evicted
+  const d5 = await engine.evaluate({ identity: 'client:swl', policy: 'swl-policy', cost: 1 });
+  assert.equal(d5.allowed, true);
+  assert.equal(d5.remaining, 2);
+
+  await engine.close();
+});
+
+test('TokenBucket burst capacity handling and refill', async () => {
+  const engine = await ThrotEngine.create();
+  engine.addPolicy({
+    name: 'burst-policy',
+    algorithm: 'token_bucket',
+    requestLimit: 10,
+    burstCapacity: 20, // Allow burst up to 20
+    refillRate: 5.0,
+    windowSeconds: 60,
+  });
+
+  // Consume burst of 15 tokens (exceeds requestLimit of 10, but within burstCapacity of 20)
+  const d1 = await engine.evaluate({
+    identity: 'client:burst',
+    policy: 'burst-policy',
+    cost: 15,
+  });
+  assert.equal(d1.allowed, true);
+  assert.equal(d1.limit, 20); // Effective limit reflects burst capacity
+  assert.equal(d1.remaining, 5);
+
+  // Request exceeding remaining 5 tokens
+  const d2 = await engine.evaluate({
+    identity: 'client:burst',
+    policy: 'burst-policy',
+    cost: 6,
+  });
+  assert.equal(d2.allowed, false);
+  assert.equal(d2.remaining, 0);
+  assert.ok(d2.retryAfter >= 1);
+});
+
+test('Cost edge cases: zero, negative, and excessive cost handling', async () => {
+  const engine = await ThrotEngine.create();
+  engine.addPolicy({
+    name: 'cost-policy',
+    algorithm: 'fixed_window',
+    requestLimit: 10,
+    windowSeconds: 60,
+  });
+
+  // Zero cost should be clamped safely to 1
+  const dZero = await engine.evaluate({
+    identity: 'client:cost',
+    policy: 'cost-policy',
+    cost: 0,
+  });
+  assert.equal(dZero.allowed, true);
+  assert.equal(dZero.remaining, 9);
+
+  // Negative cost should be clamped safely to 1
+  const dNeg = await engine.evaluate({
+    identity: 'client:cost',
+    policy: 'cost-policy',
+    cost: -5,
+  });
+  assert.equal(dNeg.allowed, true);
+  assert.equal(dNeg.remaining, 8);
+
+  // Cost exceeding total limit should be immediately rejected with remaining: 0
+  const dExceed = await engine.evaluate({
+    identity: 'client:cost',
+    policy: 'cost-policy',
+    cost: 100,
+  });
+  assert.equal(dExceed.allowed, false);
+  assert.equal(dExceed.remaining, 0, 'On rejection remaining is 0');
+});
+
+test('Default policy fallback resolution', async () => {
+  const engine = await ThrotEngine.create();
+  engine.addPolicy({
+    name: 'default-tier',
+    algorithm: 'fixed_window',
+    requestLimit: 3,
+    windowSeconds: 60,
+  });
+
+  engine.setDefaultPolicy('default-tier');
+
+  // Evaluate without providing policy name
+  const d1 = await engine.evaluate({ identity: 'client:unassigned', cost: 1 });
+  assert.equal(d1.allowed, true);
+  assert.equal(d1.remaining, 2);
+
+  const d2 = await engine.evaluate({ identity: 'client:unassigned', cost: 2 });
+  assert.equal(d2.allowed, true);
+  assert.equal(d2.remaining, 0);
+
+  const d3 = await engine.evaluate({ identity: 'client:unassigned', cost: 1 });
+  assert.equal(d3.allowed, false);
+});
+
+test('Validation and error handling', async () => {
+  // Invalid Application UUID
+  await assert.rejects(
+    async () => {
+      await ThrotEngine.create({ applicationId: 'invalid-non-uuid' });
+    },
+    /Invalid UUID/
+  );
+
+  const engine = await ThrotEngine.create();
+
+  // Invalid algorithm name
+  assert.throws(
+    () => {
+      engine.addPolicy({
+        name: 'bad-algo',
+        algorithm: 'non_existent_algorithm',
+        requestLimit: 10,
+      });
+    },
+    /Unknown algorithm/
+  );
+
+  // Non-existent policy evaluation
+  await assert.rejects(
+    async () => {
+      await engine.evaluate({
+        identity: 'client:1',
+        policy: 'unregistered-policy',
+      });
+    },
+    /Policy not found/
+  );
+
+  // Empty/whitespace identity
+  await assert.rejects(
+    async () => {
+      await engine.evaluate({
+        identity: '   ',
+        policy: 'default-tier',
+      });
+    },
+    /cannot be empty/
+  );
+});
+
 test('Redis-backed ThrotEngine operations (if Redis is running)', async () => {
   try {
     const engine = await ThrotEngine.create({ redisUrl: 'redis://localhost:6379' });
@@ -299,3 +480,4 @@ test('Redis-backed ThrotEngine operations (if Redis is running)', async () => {
     }
   }
 });
+

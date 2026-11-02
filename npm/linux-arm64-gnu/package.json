@@ -1,0 +1,23 @@
+{
+  "name": "@throt/node-linux-arm64-gnu",
+  "version": "0.1.0",
+  "description": "Native Linux ARM64 binary for @throt/node",
+  "main": "throt.linux-arm64-gnu.node",
+  "files": [
+    "throt.linux-arm64-gnu.node"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mannietech15/throt.git"
+  }
+}

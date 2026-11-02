@@ -29,7 +29,7 @@ THROT is a high-performance, distributed API rate-limiting engine written in Rus
 ## Architecture Overview
 
 <p align="center">
-  <img src="2.png" alt="THROT Architecture Overview" width="100%" />
+  <img src="rate-limit-diagram.png" alt="THROT Architecture Overview" width="100%" />
 </p>
 
 ```text
@@ -60,14 +60,14 @@ THROT is built with a single, highly optimized Rust engine that can be consumed 
 
 ### Comparison: Which Mode Should You Choose?
 
-| Feature | Mode A: In-Process Engine (`@throt/node`) | Mode B: Standalone Daemon (`throt-server`) |
-| :--- | :--- | :--- |
-| **Primary Use Case** | Node.js microservices, Express/Fastify apps | Polyglot fleets (Go, Python, Java, Ruby), API Gateways |
-| **Communication** | Direct zero-overhead C-ABI / NAPI-RS bridge | HTTP / REST API with JSON envelopes |
-| **Latency** | **Sub-microsecond** in-memory (~15-50 µs via NAPI) | Network roundtrip (~1-5 ms depending on VPC) |
-| **Storage Backends** | In-Memory (64-way lock-striped) & Distributed Redis | Distributed Redis & PostgreSQL |
-| **Deployment** | Installed as an npm package (`npm install @throt/node`) | Deployed as a standalone Docker container / process |
-| **Cross-Language** | JavaScript & TypeScript | Any language capable of issuing HTTP requests |
+| Feature              | Mode A: In-Process Engine (`@throt/node`)               | Mode B: Standalone Daemon (`throt-server`)             |
+| :------------------- | :------------------------------------------------------ | :----------------------------------------------------- |
+| **Primary Use Case** | Node.js microservices, Express/Fastify apps             | Polyglot fleets (Go, Python, Java, Ruby), API Gateways |
+| **Communication**    | Direct zero-overhead C-ABI / NAPI-RS bridge             | HTTP / REST API with JSON envelopes                    |
+| **Latency**          | **Sub-microsecond** in-memory (~15-50 µs via NAPI)      | Network roundtrip (~1-5 ms depending on VPC)           |
+| **Storage Backends** | In-Memory (64-way lock-striped) & Distributed Redis     | Distributed Redis & PostgreSQL                         |
+| **Deployment**       | Installed as an npm package (`npm install @throt/node`) | Deployed as a standalone Docker container / process    |
+| **Cross-Language**   | JavaScript & TypeScript                                 | Any language capable of issuing HTTP requests          |
 
 ---
 
@@ -84,26 +84,26 @@ Precompiled native binaries are bundled for Linux (x64/ARM64), macOS (Intel/Appl
 #### Basic Usage
 
 ```ts
-import { ThrotEngine } from '@throt/node';
+import { ThrotEngine } from "@throt/node";
 
 // Initialize ultra-fast in-memory engine (or pass { redisUrl: 'redis://localhost:6379' } for cluster Redis)
 const engine = await ThrotEngine.create();
 
 // Register a rate-limiting policy
 engine.addPolicy({
-  name: 'login-tier',
-  algorithm: 'token_bucket',
+  name: "login-tier",
+  algorithm: "token_bucket",
   requestLimit: 10,
   burstCapacity: 10,
   refillRate: 2.0, // 2 tokens replenished per second
   windowSeconds: 60,
-  failureMode: 'fail_closed',
+  failureMode: "fail_closed",
 });
 
 // Evaluate incoming requests
 const decision = await engine.evaluate({
-  identity: 'user:192.168.1.1',
-  policy: 'login-tier',
+  identity: "user:192.168.1.1",
+  policy: "login-tier",
   cost: 1,
 });
 
@@ -117,49 +117,52 @@ if (decision.allowed) {
 #### Express Middleware
 
 ```ts
-import express from 'express';
-import { ThrotEngine, expressMiddleware } from '@throt/node';
+import express from "express";
+import { ThrotEngine, expressMiddleware } from "@throt/node";
 
 const app = express();
 const engine = await ThrotEngine.create();
 
 engine.addPolicy({
-  name: 'public-api',
-  algorithm: 'sliding_window_counter',
+  name: "public-api",
+  algorithm: "sliding_window_counter",
   requestLimit: 100,
   windowSeconds: 60,
 });
 
-app.use('/api', expressMiddleware({
-  engine,
-  policy: 'public-api',
-  keyGenerator: (req) => req.headers['x-api-key'] || req.ip,
-}));
+app.use(
+  "/api",
+  expressMiddleware({
+    engine,
+    policy: "public-api",
+    keyGenerator: (req) => req.headers["x-api-key"] || req.ip,
+  }),
+);
 
-app.get('/api/data', (req, res) => {
-  res.json({ message: 'Hello from rate-protected endpoint!' });
+app.get("/api/data", (req, res) => {
+  res.json({ message: "Hello from rate-protected endpoint!" });
 });
 ```
 
 #### Fastify Plugin
 
 ```ts
-import Fastify from 'fastify';
-import { ThrotEngine, fastifyRateLimit } from '@throt/node';
+import Fastify from "fastify";
+import { ThrotEngine, fastifyRateLimit } from "@throt/node";
 
 const app = Fastify();
 const engine = await ThrotEngine.create();
 
 engine.addPolicy({
-  name: 'fastify-tier',
-  algorithm: 'token_bucket',
+  name: "fastify-tier",
+  algorithm: "token_bucket",
   requestLimit: 60,
   windowSeconds: 60,
 });
 
 app.register(fastifyRateLimit, {
   engine,
-  policy: 'fastify-tier',
+  policy: "fastify-tier",
 });
 ```
 
@@ -252,6 +255,7 @@ curl -X POST http://localhost:8080/v1/apps \
 ```
 
 Response (contains plaintext API key, displayed only once):
+
 ```json
 {
   "success": true,
@@ -305,6 +309,7 @@ curl -X POST http://localhost:8080/v1/limits/evaluate \
 ```
 
 Allowed Response (`200 OK`):
+
 ```json
 {
   "allowed": true,
@@ -315,6 +320,7 @@ Allowed Response (`200 OK`):
 ```
 
 Rejected Response (`200 OK`):
+
 ```json
 {
   "allowed": false,
@@ -330,12 +336,14 @@ Rejected Response (`200 OK`):
 ## Health & Observability Endpoints
 
 - **Liveness Probe**:
+
   ```bash
   curl http://localhost:8080/health
   # {"status":"pass","timestamp":1790000000}
   ```
 
 - **Readiness Probe**:
+
   ```bash
   curl http://localhost:8080/ready
   # {"ready":true,"redis":"ok","postgres":"ok","timestamp":1790000000}
@@ -372,13 +380,13 @@ npm test
 
 Measured via Criterion with 100 samples per algorithm on a release build:
 
-| Algorithm | Mean Latency | Throughput | Complexity | Memory Characteristics |
-| :--- | :--- | :--- | :--- | :--- |
-| **Fixed Window** | **89.34 ns** | **~11.19 M ops/sec** | $\mathcal{O}(1)$ | Scalar counter, 0 allocations |
-| **Sliding Window Counter** | **89.98 ns** | **~11.11 M ops/sec** | $\mathcal{O}(1)$ | Weighted approximation, 0 allocations |
-| **Token Bucket** | **107.74 ns** | **~9.28 M ops/sec** | $\mathcal{O}(1)$ | Floating replenishment, 0 allocations |
-| **Leaky Bucket (GCRA)** | **107.71 ns** | **~9.28 M ops/sec** | $\mathcal{O}(1)$ | Continuous drain, 0 allocations |
-| **Sliding Window Log** | **485.29 ns** | **~2.06 M ops/sec** | $\mathcal{O}(N)$ | Rolling vector shift / memory allocation |
+| Algorithm                  | Mean Latency  | Throughput           | Complexity       | Memory Characteristics                   |
+| :------------------------- | :------------ | :------------------- | :--------------- | :--------------------------------------- |
+| **Fixed Window**           | **89.34 ns**  | **~11.19 M ops/sec** | $\mathcal{O}(1)$ | Scalar counter, 0 allocations            |
+| **Sliding Window Counter** | **89.98 ns**  | **~11.11 M ops/sec** | $\mathcal{O}(1)$ | Weighted approximation, 0 allocations    |
+| **Token Bucket**           | **107.74 ns** | **~9.28 M ops/sec**  | $\mathcal{O}(1)$ | Floating replenishment, 0 allocations    |
+| **Leaky Bucket (GCRA)**    | **107.71 ns** | **~9.28 M ops/sec**  | $\mathcal{O}(1)$ | Continuous drain, 0 allocations          |
+| **Sliding Window Log**     | **485.29 ns** | **~2.06 M ops/sec**  | $\mathcal{O}(N)$ | Rolling vector shift / memory allocation |
 
 Run Criterion microbenchmarks:
 
@@ -390,9 +398,9 @@ cargo bench -p throt-algorithms
 
 Measured via native Node.js bridge (`benches/node_bench.js`):
 
-| Evaluation Type | Latency | Throughput |
-| :--- | :--- | :--- |
-| **Concurrent Async (Batches of 10)** | **15.72 µs/op** | **~63,629 ops/sec** |
+| Evaluation Type                        | Latency         | Throughput          |
+| :------------------------------------- | :-------------- | :------------------ |
+| **Concurrent Async (Batches of 10)**   | **15.72 µs/op** | **~63,629 ops/sec** |
 | **Sequential Async (Single-threaded)** | **56.89 µs/op** | **~17,577 ops/sec** |
 
 Run Node.js integration benchmarks:

@@ -1,0 +1,20 @@
+{
+  "name": "@throt/node-darwin-x64",
+  "version": "0.1.0",
+  "description": "Native macOS x64 binary for @throt/node",
+  "main": "throt.darwin-x64.node",
+  "files": [
+    "throt.darwin-x64.node"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mannietech15/throt.git"
+  }
+}

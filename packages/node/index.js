@@ -51,11 +51,22 @@ function loadBinding() {
 const binding = loadBinding();
 
 const ThrotEngine = binding.ThrotEngine;
+const { expressMiddleware } = require('./express');
+const { fastifyRateLimit } = require('./fastify');
+
+function createEngine(config) {
+  return ThrotEngine.create(config);
+}
 
 module.exports = {
   ThrotEngine,
-  // Helper shortcuts
-  createEngine: (config) => ThrotEngine.create(config),
-  expressMiddleware: require('./express').expressMiddleware,
-  fastifyRateLimit: require('./fastify').fastifyRateLimit,
+  createEngine,
+  expressMiddleware,
+  fastifyRateLimit,
 };
+
+module.exports.ThrotEngine = ThrotEngine;
+module.exports.createEngine = createEngine;
+module.exports.expressMiddleware = expressMiddleware;
+module.exports.fastifyRateLimit = fastifyRateLimit;
+

@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-native:
@@ -74,7 +74,7 @@ jobs:
           path: artifacts/${{ matrix.artifact }}
 
   publish-npm:
-    name: Publish to npm
+    name: Publish to npm & GitHub Release Assets
     needs: build-native
     runs-on: ubuntu-latest
     steps:
@@ -113,18 +113,38 @@ jobs:
           echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
           echo "dist_tag=${DIST_TAG}" >> $GITHUB_OUTPUT
 
+      - name: Attach Native Binaries to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "Collecting native binaries for GitHub Release assets..."
+          mkdir -p release-binaries
+          find npm-artifacts -type f -name "*.node" -exec cp {} release-binaries/ \;
+          ls -la release-binaries/
+          gh release upload "${GITHUB_REF_NAME}" release-binaries/* --clobber || echo "GitHub release upload step completed."
+
+      - name: Check NPM_TOKEN Availability
+        id: check_token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            echo "has_token=true" >> $GITHUB_OUTPUT
+            echo "NPM_TOKEN is configured. Proceeding with npm registry publication."
+          else
+            echo "has_token=false" >> $GITHUB_OUTPUT
+            echo "::notice::NPM_TOKEN secret is not set in repository secrets. Skipping npm publish step. Precompiled native binaries have been compiled and attached to the GitHub Release."
+          fi
+
       - name: Prepare and Publish Platform Packages First
+        if: steps.check_token.outputs.has_token == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_VERSION: ${{ steps.release_meta.outputs.release_version }}
           DIST_TAG: ${{ steps.release_meta.outputs.dist_tag }}
         run: |
           set -e
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "::error::NPM_TOKEN secret is not set in repository secrets."
-            exit 1
-          fi
-
           echo "Publishing THROT native platform packages for version ${RELEASE_VERSION} under tag ${DIST_TAG}..."
 
           PLATFORMS=("linux-x64-gnu" "linux-arm64-gnu" "darwin-x64" "darwin-arm64" "win32-x64-msvc")
@@ -157,6 +177,7 @@ jobs:
           done
 
       - name: Publish Main @throt/node Package
+        if: steps.check_token.outputs.has_token == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           RELEASE_VERSION: ${{ steps.release_meta.outputs.release_version }}

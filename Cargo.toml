@@ -6,6 +6,7 @@ members = [
     "crates/throt-storage",
     "crates/throt-api",
     "crates/throt-server",
+    "crates/throt-napi",
 ]
 
 [workspace.package]
@@ -21,6 +22,7 @@ throt-core = { path = "crates/throt-core" }
 throt-algorithms = { path = "crates/throt-algorithms" }
 throt-storage = { path = "crates/throt-storage" }
 throt-api = { path = "crates/throt-api" }
+throt-napi = { path = "crates/throt-napi" }
 
 # Async runtime & HTTP
 tokio = { version = "1.43", features = ["full"] }

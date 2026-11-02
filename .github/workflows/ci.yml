@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-rust:
+    name: Rust Test Suite & Lints
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: throt
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check Formatting
+        run: cargo fmt --check
+
+      - name: Clippy Linter
+        run: cargo clippy --workspace --benches --all-targets -- -D warnings
+
+      - name: Run Workspace Tests
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/throt
+          REDIS_URL: redis://localhost:6379
+        run: cargo test --workspace
+
+  test-node:
+    name: Node.js In-Process Integration Tests
+    runs-on: ubuntu-latest
+    needs: test-rust
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build Native Addon
+        run: |
+          cargo build -p throt-napi --release
+          node scripts/copy-binary.js
+
+      - name: Run Node.js Tests
+        run: npm test
+
+      - name: Run Node.js Benchmarks
+        run: npm run bench

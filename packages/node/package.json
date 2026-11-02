@@ -1,0 +1,56 @@
+{
+  "name": "@throt/node",
+  "version": "0.1.0",
+  "description": "High-performance distributed API rate-limiting engine for Node.js powered by Rust",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./express": {
+      "types": "./express.d.ts",
+      "default": "./express.js"
+    },
+    "./fastify": {
+      "types": "./fastify.d.ts",
+      "default": "./fastify.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "express.js",
+    "express.d.ts",
+    "fastify.js",
+    "fastify.d.ts",
+    "throt.node"
+  ],
+  "optionalDependencies": {
+    "@throt/node-linux-x64-gnu": "0.1.0",
+    "@throt/node-linux-arm64-gnu": "0.1.0",
+    "@throt/node-darwin-x64": "0.1.0",
+    "@throt/node-darwin-arm64": "0.1.0",
+    "@throt/node-win32-x64-msvc": "0.1.0"
+  },
+  "keywords": [
+    "rate-limit",
+    "rate-limiter",
+    "redis",
+    "token-bucket",
+    "leaky-bucket",
+    "sliding-window",
+    "rust",
+    "napi",
+    "express",
+    "fastify",
+    "security"
+  ],
+  "author": "Mannie <mannietech817@gmail.com>",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mannietech15/throt.git"
+  }
+}

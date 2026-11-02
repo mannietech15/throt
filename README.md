@@ -52,27 +52,163 @@ THROT is a high-performance, distributed API rate-limiting engine written in Rus
 
 ---
 
-## Workspace Structure
+---
 
-The project is structured as a modular Cargo workspace:
+## Two Integration Modes
 
-```text
-throt/
-├── crates/
-│   ├── throt-core/         # Domain models (Identity, Policy, Decision, Errors) & RateLimitEngine
-│   ├── throt-algorithms/   # 5 rate limiting algorithms, Lua scripts, and Criterion benchmarks
-│   ├── throt-storage/      # Redis connection manager & PostgreSQL metadata pool
-│   ├── throt-api/          # Axum routes, auth middleware, metrics exporter & envelopes
-│   └── throt-server/       # Server entrypoint, configuration validator & graceful shutdown
-├── migrations/             # SQLx database schema migrations
-├── tests/                  # Concurrency and integration tests
-├── docker-compose.yml      # Local development environment (Postgres + Redis + THROT)
-└── Dockerfile              # Multi-stage production container build
+THROT is built with a single, highly optimized Rust engine that can be consumed in two distinct ways:
+
+### Comparison: Which Mode Should You Choose?
+
+| Feature | Mode A: In-Process Engine (`@throt/node`) | Mode B: Standalone Daemon (`throt-server`) |
+| :--- | :--- | :--- |
+| **Primary Use Case** | Node.js microservices, Express/Fastify apps | Polyglot fleets (Go, Python, Java, Ruby), API Gateways |
+| **Communication** | Direct zero-overhead C-ABI / NAPI-RS bridge | HTTP / REST API with JSON envelopes |
+| **Latency** | **Sub-microsecond** in-memory (~15-50 µs via NAPI) | Network roundtrip (~1-5 ms depending on VPC) |
+| **Storage Backends** | In-Memory (64-way lock-striped) & Distributed Redis | Distributed Redis & PostgreSQL |
+| **Deployment** | Installed as an npm package (`npm install @throt/node`) | Deployed as a standalone Docker container / process |
+| **Cross-Language** | JavaScript & TypeScript | Any language capable of issuing HTTP requests |
+
+---
+
+### Mode A: In-Process Engine (`@throt/node`)
+
+Install the package directly into your Node.js application:
+
+```bash
+npm install @throt/node
+```
+
+Precompiled native binaries are bundled for Linux (x64/ARM64), macOS (Intel/Apple Silicon), and Windows (x64). Developers do not need Rust, Cargo, or a C compiler installed.
+
+#### Basic Usage
+
+```ts
+import { ThrotEngine } from '@throt/node';
+
+// Initialize ultra-fast in-memory engine (or pass { redisUrl: 'redis://localhost:6379' } for cluster Redis)
+const engine = await ThrotEngine.create();
+
+// Register a rate-limiting policy
+engine.addPolicy({
+  name: 'login-tier',
+  algorithm: 'token_bucket',
+  requestLimit: 10,
+  burstCapacity: 10,
+  refillRate: 2.0, // 2 tokens replenished per second
+  windowSeconds: 60,
+  failureMode: 'fail_closed',
+});
+
+// Evaluate incoming requests
+const decision = await engine.evaluate({
+  identity: 'user:192.168.1.1',
+  policy: 'login-tier',
+  cost: 1,
+});
+
+if (decision.allowed) {
+  console.log(`Allowed! Remaining quota: ${decision.remaining}`);
+} else {
+  console.log(`Rate limited! Retry after ${decision.retryAfter}s`);
+}
+```
+
+#### Express Middleware
+
+```ts
+import express from 'express';
+import { ThrotEngine, expressMiddleware } from '@throt/node';
+
+const app = express();
+const engine = await ThrotEngine.create();
+
+engine.addPolicy({
+  name: 'public-api',
+  algorithm: 'sliding_window_counter',
+  requestLimit: 100,
+  windowSeconds: 60,
+});
+
+app.use('/api', expressMiddleware({
+  engine,
+  policy: 'public-api',
+  keyGenerator: (req) => req.headers['x-api-key'] || req.ip,
+}));
+
+app.get('/api/data', (req, res) => {
+  res.json({ message: 'Hello from rate-protected endpoint!' });
+});
+```
+
+#### Fastify Plugin
+
+```ts
+import Fastify from 'fastify';
+import { ThrotEngine, fastifyRateLimit } from '@throt/node';
+
+const app = Fastify();
+const engine = await ThrotEngine.create();
+
+engine.addPolicy({
+  name: 'fastify-tier',
+  algorithm: 'token_bucket',
+  requestLimit: 60,
+  windowSeconds: 60,
+});
+
+app.register(fastifyRateLimit, {
+  engine,
+  policy: 'fastify-tier',
+});
 ```
 
 ---
 
-## Quickstart
+### Mode B: Standalone HTTP Daemon (`throt-server`)
+
+For polyglot infrastructure or centralized API gateways, deploy THROT as an independent containerized service:
+
+```bash
+docker compose up -d
+```
+
+Applications communicate over HTTP:
+
+```bash
+curl -X POST http://localhost:8080/v1/limits/evaluate \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <your-api-key>" \
+  -d '{
+    "identity": "client:ip_10.0.0.1",
+    "policy": "payment_service",
+    "cost": 1
+  }'
+```
+
+---
+
+## Workspace Structure
+
+The project is structured as a modular Cargo & npm workspace:
+
+```text
+throt/
+├── crates/
+│   ├── throt-core/         # Language-independent domain models & RateLimitEngine
+│   ├── throt-algorithms/   # 5 rate limiting algorithms, Lua scripts, and lock-striped backend
+│   ├── throt-storage/      # Redis connection manager & PostgreSQL metadata pool
+│   ├── throt-api/          # Standalone HTTP REST API & Axum handlers
+│   ├── throt-server/       # Standalone daemon binary entrypoint
+│   └── throt-napi/         # Native C-ABI / NAPI-RS bridge with dedicated Tokio runtime
+├── packages/
+│   └── node/               # @throt/node package, Express & Fastify integrations, TypeScript declarations
+├── examples/               # Practical integration examples (Express, Fastify, HTTP client)
+├── benches/                # Algorithm microbenchmarks & Node.js NAPI-RS integration benchmarks
+├── migrations/             # SQLx database schema migrations
+├── docker-compose.yml      # Local development environment (Postgres + Redis + THROT)
+└── Dockerfile              # Multi-stage production container build
+```
 
 ### Prerequisites
 
@@ -218,18 +354,51 @@ Rejected Response (`200 OK`):
 
 ### Test Suite
 
-Run unit, integration, and Redis concurrency tests:
+Run Rust unit, integration, and Redis concurrency tests:
 
 ```bash
 cargo test --workspace
 ```
 
-### Benchmarks
+Run Node.js NAPI-RS native binding tests:
 
-Run Criterion algorithm microbenchmarks:
+```bash
+npm test
+```
+
+### Performance Benchmarks
+
+#### 1. Core Rust Algorithm Latency (Criterion)
+
+Measured via Criterion with 100 samples per algorithm on a release build:
+
+| Algorithm | Mean Latency | Throughput | Complexity | Memory Characteristics |
+| :--- | :--- | :--- | :--- | :--- |
+| **Fixed Window** | **89.34 ns** | **~11.19 M ops/sec** | $\mathcal{O}(1)$ | Scalar counter, 0 allocations |
+| **Sliding Window Counter** | **89.98 ns** | **~11.11 M ops/sec** | $\mathcal{O}(1)$ | Weighted approximation, 0 allocations |
+| **Token Bucket** | **107.74 ns** | **~9.28 M ops/sec** | $\mathcal{O}(1)$ | Floating replenishment, 0 allocations |
+| **Leaky Bucket (GCRA)** | **107.71 ns** | **~9.28 M ops/sec** | $\mathcal{O}(1)$ | Continuous drain, 0 allocations |
+| **Sliding Window Log** | **485.29 ns** | **~2.06 M ops/sec** | $\mathcal{O}(N)$ | Rolling vector shift / memory allocation |
+
+Run Criterion microbenchmarks:
 
 ```bash
 cargo bench -p throt-algorithms
+```
+
+#### 2. Node.js NAPI-RS In-Process Throughput
+
+Measured via native Node.js bridge (`benches/node_bench.js`):
+
+| Evaluation Type | Latency | Throughput |
+| :--- | :--- | :--- |
+| **Concurrent Async (Batches of 10)** | **15.72 µs/op** | **~63,629 ops/sec** |
+| **Sequential Async (Single-threaded)** | **56.89 µs/op** | **~17,577 ops/sec** |
+
+Run Node.js integration benchmarks:
+
+```bash
+npm run bench
 ```
 
 ---

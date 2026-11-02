@@ -1,0 +1,113 @@
+name: Release npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-native:
+    name: Build Native - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: throt.linux-x64-gnu.node
+            package: node-linux-x64-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact: throt.linux-arm64-gnu.node
+            package: node-linux-arm64-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: throt.darwin-x64.node
+            package: node-darwin-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: throt.darwin-arm64.node
+            package: node-darwin-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: throt.win32-x64-msvc.node
+            package: node-win32-x64-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build target
+        run: cargo build -p throt-napi --release --target ${{ matrix.target }}
+
+      - name: Package native binary
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp target/${{ matrix.target }}/release/throt_napi.dll artifacts/${{ matrix.artifact }}
+          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+            cp target/${{ matrix.target }}/release/libthrot_napi.dylib artifacts/${{ matrix.artifact }}
+          else
+            cp target/${{ matrix.target }}/release/libthrot_napi.so artifacts/${{ matrix.artifact }}
+          fi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}
+          path: artifacts/${{ matrix.artifact }}
+
+  publish-npm:
+    name: Publish to npm
+    needs: build-native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download all native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: npm-artifacts
+
+      - name: Prepare and Publish Platform Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in npm-artifacts/*; do
+            pkg_name=$(basename "$dir")
+            echo "Publishing @throt/$pkg_name..."
+            mkdir -p "dist-$pkg_name"
+            cp "$dir"/* "dist-$pkg_name/"
+            cat <<EOF > "dist-$pkg_name/package.json"
+          {
+            "name": "@throt/$pkg_name",
+            "version": "${GITHUB_REF#refs/tags/v}",
+            "os": ["${pkg_name%%-*}"],
+            "cpu": ["${pkg_name##*-}"],
+            "main": "$(ls -1 "$dir")"
+          }
+          EOF
+            # npm publish "dist-$pkg_name" --access public --provenance
+          done
+
+      - name: Publish Main @throt/node Package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "Ready to publish @throt/node to npm registry."
+          # npm publish packages/node --access public --provenance

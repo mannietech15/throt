@@ -1,0 +1,18 @@
+{
+  "name": "throt-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "High-Performance Distributed API Rate-Limiting Engine",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build:native": "cargo build -p throt-napi --release && node scripts/copy-binary.js",
+    "test": "node --test packages/node/test/*.test.js",
+    "bench": "node benches/node_bench.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

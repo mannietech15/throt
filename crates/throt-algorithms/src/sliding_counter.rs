@@ -12,27 +12,33 @@ local limit = tonumber(ARGV[2])
 local window_sec = tonumber(ARGV[3])
 
 local current_window = math.floor(current_sec / window_sec) * window_sec
-local prev_window = current_window - window_sec
-
-local current_key = KEYS[1] .. ':' .. tostring(current_window)
-local prev_key = KEYS[1] .. ':' .. tostring(prev_window)
-
-local current_count = tonumber(redis.call('GET', current_key) or '0')
-local prev_count = tonumber(redis.call('GET', prev_key) or '0')
-
-local elapsed = current_sec - current_window
-local weight = (window_sec - elapsed) / window_sec
-local estimated = math.floor(prev_count * weight) + current_count
-
 local reset_at = current_window + window_sec
 local retry_after = reset_at - current_sec
 if retry_after <= 0 then retry_after = 1 end
 
-if estimated + cost <= limit then
-    local new_val = redis.call('INCRBY', current_key, cost)
-    if current_count == 0 then
-        redis.call('EXPIRE', current_key, window_sec * 2)
+local data = redis.call('HMGET', KEYS[1], 'w', 'c', 'p')
+local stored_w = tonumber(data[1] or '0')
+local current_c = tonumber(data[2] or '0')
+local prev_c = tonumber(data[3] or '0')
+
+if current_window > stored_w then
+    if current_window == stored_w + window_sec then
+        prev_c = current_c
+    else
+        prev_c = 0
     end
+    current_c = 0
+    stored_w = current_window
+end
+
+local elapsed = current_sec - current_window
+local weight = (window_sec - elapsed) / window_sec
+local estimated = math.floor(prev_c * weight) + current_c
+
+if estimated + cost <= limit then
+    current_c = current_c + cost
+    redis.call('HMSET', KEYS[1], 'w', stored_w, 'c', current_c, 'p', prev_c)
+    redis.call('EXPIRE', KEYS[1], window_sec * 2)
 
     local remaining = limit - (estimated + cost)
     return { 1, remaining, reset_at, 0 }

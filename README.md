@@ -415,23 +415,25 @@ npm run bench
 
 ### Operating Systems & Architectures
 
-Precompiled native packages are built and verified for the following targets:
+Precompiled native packages are distributed via npm optional dependencies for the following targets:
 
-| Platform | Architecture | Binary Package | Verified Status |
+| Platform | Architecture | Binary Package | Verification Status |
 | :--- | :--- | :--- | :--- |
-| **Linux (glibc)** | `x86_64` | `@throt/node-linux-x64-gnu` | ✅ Locally Built & Tested |
-| **Linux (glibc)** | `aarch64` (ARM64) | `@throt/node-linux-arm64-gnu` | 🚀 CI Matrix Cross-compiled |
-| **macOS** | `x86_64` (Intel) | `@throt/node-darwin-x64` | 🚀 CI Matrix macOS-13 |
-| **macOS** | `aarch64` (Apple Silicon M1-M4) | `@throt/node-darwin-arm64` | 🚀 CI Matrix macOS-latest |
-| **Windows** | `x86_64` | `@throt/node-win32-x64-msvc` | 🚀 CI Matrix Windows-latest |
+| **Linux (glibc)** | `x86_64` | `@throt/node-linux-x64-gnu` | ✅ **Runtime Verified** (Native Ubuntu runner & local suite) |
+| **macOS** | `aarch64` (Apple Silicon M1-M4) | `@throt/node-darwin-arm64` | ✅ **Runtime Verified** (Native Apple Silicon `macos-latest` runner) |
+| **Windows** | `x86_64` | `@throt/node-win32-x64-msvc` | ✅ **Runtime Verified** (Native Windows Server `windows-latest` runner) |
+| **Linux (glibc)** | `aarch64` (ARM64) | `@throt/node-linux-arm64-gnu` | ⚙️ **Cross-Compiled & Link Verified** (`aarch64-linux-gnu-gcc` in CI) |
+| **macOS** | `x86_64` (Intel) | `@throt/node-darwin-x64` | ⚙️ **Cross-Compiled & Link Verified** (Xcode Clang targeting x86_64) |
+
+> **Note on Verification**: Platforms marked **Runtime Verified** have successfully loaded the compiled `.node` native addon and passed the complete test suite on native host hardware. Platforms marked **Cross-Compiled & Link Verified** have their shared libraries built and dynamically linked in CI, but have not yet been runtime-tested on physical host hardware.
 
 ### Node.js Version Support
 
 THROT's NAPI-RS native bindings target active and current Node.js release lines:
 
-- **Node.js 22.x LTS** (Active LTS)
-- **Node.js 24.x LTS** (Active LTS)
-- **Node.js 26.x Current** (Node-API v9 ABI-stable forward compatible)
+- **Node.js 22.x LTS**: ✅ Verified in automated CI test suite & local development
+- **Node.js 24.x LTS**: ✅ Verified in automated CI test suite & local development
+- **Node.js 26.x Current**: ✅ Verified in CI test suite (Node-API v9 ABI-stable forward compatible)
 
 *(Note: Node.js 18 and 20 are End-of-Life and are not supported for production deployments).*
 

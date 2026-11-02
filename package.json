@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build:native": "cargo build -p throt-napi --release && node scripts/copy-binary.js",
-    "test": "node --test packages/node/test/*.test.js && node packages/node/test/esm-check.mjs && npx typescript --noEmit packages/node/test/ts-check.ts",
+    "test": "node --test packages/node/test/*.test.js && node packages/node/test/esm-check.mjs && tsc --noEmit packages/node/test/ts-check.ts",
     "bench": "node benches/node_bench.js"
   },
   "devDependencies": {

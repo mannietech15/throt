@@ -20,23 +20,23 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: throt.linux-x64-gnu.node
-            package: node-linux-x64-gnu
+            package_dir: linux-x64-gnu
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             artifact: throt.linux-arm64-gnu.node
-            package: node-linux-arm64-gnu
-          - os: macos-latest
+            package_dir: linux-arm64-gnu
+          - os: macos-13
             target: x86_64-apple-darwin
             artifact: throt.darwin-x64.node
-            package: node-darwin-x64
+            package_dir: darwin-x64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: throt.darwin-arm64.node
-            package: node-darwin-arm64
+            package_dir: darwin-arm64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: throt.win32-x64-msvc.node
-            package: node-win32-x64-msvc
+            package_dir: win32-x64-msvc
 
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +47,12 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install aarch64 cross-compiler (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
       - name: Build target
         run: cargo build -p throt-napi --release --target ${{ matrix.target }}
 
@@ -56,7 +62,7 @@ jobs:
           mkdir -p artifacts
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             cp target/${{ matrix.target }}/release/throt_napi.dll artifacts/${{ matrix.artifact }}
-          elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+          elif [[ "${{ matrix.os }}" == "macos-13" || "${{ matrix.os }}" == "macos-latest" ]]; then
             cp target/${{ matrix.target }}/release/libthrot_napi.dylib artifacts/${{ matrix.artifact }}
           else
             cp target/${{ matrix.target }}/release/libthrot_napi.so artifacts/${{ matrix.artifact }}
@@ -65,7 +71,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.package }}
+          name: ${{ matrix.package_dir }}
           path: artifacts/${{ matrix.artifact }}
 
   publish-npm:
@@ -84,30 +90,57 @@ jobs:
         with:
           path: npm-artifacts
 
-      - name: Prepare and Publish Platform Packages
+      - name: Prepare and Publish Platform Packages First
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          for dir in npm-artifacts/*; do
-            pkg_name=$(basename "$dir")
-            echo "Publishing @throt/$pkg_name..."
-            mkdir -p "dist-$pkg_name"
-            cp "$dir"/* "dist-$pkg_name/"
-            cat <<EOF > "dist-$pkg_name/package.json"
-          {
-            "name": "@throt/$pkg_name",
-            "version": "${GITHUB_REF#refs/tags/v}",
-            "os": ["${pkg_name%%-*}"],
-            "cpu": ["${pkg_name##*-}"],
-            "main": "$(ls -1 "$dir")"
-          }
-          EOF
-            # npm publish "dist-$pkg_name" --access public --provenance
+          set -e
+          RELEASE_VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Releasing THROT version ${RELEASE_VERSION}..."
+
+          PLATFORMS=("linux-x64-gnu" "linux-arm64-gnu" "darwin-x64" "darwin-arm64" "win32-x64-msvc")
+
+          for platform in "${PLATFORMS[@]}"; do
+            echo "Packaging npm/$platform..."
+            if [ ! -d "npm-artifacts/$platform" ]; then
+              echo "Error: Missing artifact for platform $platform"
+              exit 1
+            fi
+            
+            cp npm-artifacts/"$platform"/* "npm/$platform/"
+            
+            # Update version in platform package.json
+            node -e "
+              const fs = require('fs');
+              const path = 'npm/$platform/package.json';
+              const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+              pkg.version = '$RELEASE_VERSION';
+              fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+            "
+            
+            echo "Publishing @throt/node-$platform..."
+            npm publish "npm/$platform" --access public --provenance
           done
 
       - name: Publish Main @throt/node Package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          echo "Ready to publish @throt/node to npm registry."
-          # npm publish packages/node --access public --provenance
+          set -e
+          RELEASE_VERSION="${GITHUB_REF#refs/tags/v}"
+          
+          # Update version and optionalDependencies in packages/node/package.json
+          node -e "
+            const fs = require('fs');
+            const path = 'packages/node/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            pkg.version = '$RELEASE_VERSION';
+            for (const key of Object.keys(pkg.optionalDependencies || {})) {
+              pkg.optionalDependencies[key] = '$RELEASE_VERSION';
+            }
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+          "
+          
+          echo "Publishing main @throt/node wrapper package..."
+          npm publish packages/node --access public --provenance
+

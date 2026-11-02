@@ -16,3 +16,11 @@
 # Test & coverage artifacts
 coverage/
 *.lcov
+
+# Node.js
+node_modules/
+npm-artifacts/
+*.tgz
+*.node
+
+

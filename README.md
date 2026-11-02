@@ -411,6 +411,64 @@ npm run bench
 
 ---
 
+## Supported Platforms & Environments
+
+### Operating Systems & Architectures
+
+Precompiled native packages are built and verified for the following targets:
+
+| Platform | Architecture | Binary Package | Verified Status |
+| :--- | :--- | :--- | :--- |
+| **Linux (glibc)** | `x86_64` | `@throt/node-linux-x64-gnu` | ✅ Locally Built & Tested |
+| **Linux (glibc)** | `aarch64` (ARM64) | `@throt/node-linux-arm64-gnu` | 🚀 CI Matrix Cross-compiled |
+| **macOS** | `x86_64` (Intel) | `@throt/node-darwin-x64` | 🚀 CI Matrix macOS-13 |
+| **macOS** | `aarch64` (Apple Silicon M1-M4) | `@throt/node-darwin-arm64` | 🚀 CI Matrix macOS-latest |
+| **Windows** | `x86_64` | `@throt/node-win32-x64-msvc` | 🚀 CI Matrix Windows-latest |
+
+### Node.js Version Support
+
+- **Node.js 18.x LTS**
+- **Node.js 20.x LTS**
+- **Node.js 22.x LTS**
+- **Node.js 24.x Current**
+
+---
+
+## Technical Limitations & Considerations
+
+1. **Sliding Window Log Memory Consumption**:
+   The sliding window log retains individual request timestamps within the active time window. Under extreme traffic (> 50,000 requests/sec per identity), use **Sliding Window Counter** or **Token Bucket** instead to avoid unbounded timestamp vector growth.
+
+2. **In-Memory vs. Distributed State Scope**:
+   In-memory engine mode (`storage: { type: 'memory' }`) maintains local 64-way lock-striped state per OS process. If your application scales horizontally across multiple independent pods or servers, configure `{ redisUrl: 'redis://...' }` to guarantee globally synchronized cluster state.
+
+3. **Cluster Key Hashing in Redis**:
+   Single-key Redis hash evaluation is implemented across all 5 algorithms (`throt:swc:{id}:{policy}`), ensuring 100% hash-slot compatibility in Redis Cluster without cross-slot routing errors.
+
+---
+
+## Contributing
+
+We welcome contributions to THROT! Please follow these engineering standards:
+
+1. **Rust Formatting & Linting**:
+   ```bash
+   cargo fmt --check
+   cargo clippy --workspace --all-targets -- -D warnings
+   ```
+2. **Rust & Concurrency Tests**:
+   ```bash
+   cargo test --workspace
+   ```
+3. **Node.js & NAPI-RS Native Tests**:
+   ```bash
+   npm test
+   ```
+4. **Commits**: Follow conventional commits (`feat:`, `fix:`, `perf:`, `docs:`, `test:`).
+
+---
+
 ## License
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE) at your option.
+
